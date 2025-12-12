@@ -1,6 +1,8 @@
 import { useState, useCallback } from 'react';
 import { MeetingSummary, EmailDraft, EmailInclusions } from '@/types/meeting';
 import { AppSettings } from '@/types/settings';
+import { renderSignatureTemplate } from '@/lib/utils';
+import { generateEmailBodyWithTemplate } from '@/lib/emailTemplates';
 import { toast } from 'sonner';
 
 const generateEmailLocally = (
@@ -18,7 +20,7 @@ const generateEmailLocally = (
     return `Follow-up: ${summaryWords}... | ${companyProfile.companyName}`;
   };
 
-  // Generate body based on settings and inclusions
+  // Generate body based on settings and inclusions (returns HTML)
   const generateBody = () => {
     const greeting = emailSettings.tone === 'professional' 
       ? `Dear ${meeting.recipientName},` 
@@ -28,68 +30,30 @@ const generateEmailLocally = (
       ? `Thank you for taking the time to meet with me on ${meeting.meetingDate} at ${meeting.meetingTime}. It was a pleasure discussing with you.`
       : `Great catching up with you on ${meeting.meetingDate}! Really enjoyed our conversation.`;
 
-    let body = `${greeting}\n\n${intro}\n\n`;
-
-    if (inclusions.meetingSummary) {
-      body += `**Meeting Summary:**\n${meeting.summary}\n\n`;
-    }
-
-    if (inclusions.actionItems && meeting.actionItems.length > 0) {
-      body += `**Action Items & Next Steps:**\n`;
-      meeting.actionItems.forEach((item, i) => {
-        body += `${i + 1}. ${item}\n`;
-      });
-      body += '\n';
-    }
-
-    if (meeting.keyDecisions.length > 0) {
-      body += `**Key Decisions:**\n`;
-      meeting.keyDecisions.forEach((decision, i) => {
-        body += `• ${decision}\n`;
-      });
-      body += '\n';
-    }
-
-    if (inclusions.companyProfile) {
-      body += `**About ${companyProfile.companyName}:**\n`;
-      body += `${companyProfile.tagline}\n`;
-      body += `Website: ${companyProfile.website}\n\n`;
-    }
-
-    if (selectedServices.length > 0) {
-      body += `**Our Services:**\n`;
-      selectedServices.forEach((service) => {
-        body += `• ${service.name}: ${service.description}\n`;
-      });
-      body += '\n';
-    }
-
-    // CTA
     const ctaMessages = {
       schedule_call: "Would you be available for a follow-up call this week? Let me know your preferred time.",
       request_confirmation: "Could you please confirm receipt of this email and let me know your thoughts?",
       share_brochure: "I'd be happy to share our detailed brochure. Would you like me to send it over?",
       send_proposal: "I'll prepare a detailed proposal based on our discussion. Expect it within the next few days."
     };
-    body += `${ctaMessages[emailSettings.ctaStyle]}\n\n`;
 
-    // Closing
-    body += emailSettings.tone === 'professional' 
+    const closing = emailSettings.tone === 'professional' 
       ? 'Best regards,' 
       : 'Looking forward to hearing from you!';
 
-    if (inclusions.userProfile) {
-      body += `\n\n${userProfile.name}\n${userProfile.jobTitle}\n${companyProfile.companyName}\n📞 ${userProfile.phone} | ✉️ ${userProfile.email}`;
-      if (companyProfile.website) {
-        body += `\n🌐 ${companyProfile.website}`;
+    // Use the selected template to generate email body
+    return generateEmailBodyWithTemplate(
+      emailSettings.emailBodyTemplate,
+      {
+        meeting,
+        settings,
+        inclusions,
+        greeting,
+        intro,
+        ctaMessage: ctaMessages[emailSettings.ctaStyle],
+        closing,
       }
-    }
-
-    if (emailSettings.includeCompliance && emailSettings.complianceText) {
-      body += `\n\n---\n${emailSettings.complianceText}`;
-    }
-
-    return body;
+    );
   };
 
   if (type === 'subject') return { subject: generateSubject() };

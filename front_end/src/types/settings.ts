@@ -14,6 +14,7 @@ export interface CompanyProfile {
   tagline: string;
   legalName?: string;
   supportEmail?: string;
+  logoUrl?: string;
 }
 
 export interface ServiceItem {
@@ -23,6 +24,8 @@ export interface ServiceItem {
   enabled: boolean;
 }
 
+export type EmailBodyTemplate = 'classic' | 'modern' | 'minimal' | 'colorful' | 'elegant';
+
 export interface EmailSettings {
   tone: 'professional' | 'friendly';
   length: 'short' | 'detailed';
@@ -30,6 +33,8 @@ export interface EmailSettings {
   includeCompliance: boolean;
   complianceText: string;
   signatureTemplate: string;
+  autoAppendSignature: boolean;
+  emailBodyTemplate: EmailBodyTemplate;
   systemPrompt: string;
 }
 
@@ -56,6 +61,7 @@ export const defaultSettings: AppSettings = {
     tagline: 'Transforming Ideas into Digital Reality',
     legalName: 'TechVentures International Inc.',
     supportEmail: 'support@techventures.com',
+    logoUrl: '/Tekisho-Logo.jpg',
   },
   services: [
     { id: '1', name: 'Custom Software Development', description: 'End-to-end software solutions', enabled: true },
@@ -76,6 +82,8 @@ export const defaultSettings: AppSettings = {
   <p style="margin: 8px 0 2px 0; color: #718096; font-size: 13px;">📞 {{phone}} | ✉️ {{email}}</p>
   <p style="margin: 2px 0; color: #718096; font-size: 13px;">🌐 {{website}}</p>
 </div>`,
+    autoAppendSignature: true,
+    emailBodyTemplate: 'classic',
     systemPrompt: `You are a professional email drafting assistant. Generate follow-up emails based on meeting summaries.
 
 Guidelines:

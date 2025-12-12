@@ -8,7 +8,10 @@ import { Switch } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useSettings } from '@/context/SettingsContext';
 import { useEmailGenerator } from '@/hooks/useEmailGenerator';
+import { emailService } from '@/services/emailService';
+import { renderSignatureTemplate } from '@/lib/utils';
 import { EmailDraft, EmailInclusions, sampleMeetingSummary } from '@/types/meeting';
+import { FileAttachment } from '@/components/email/FileAttachment';
 import { toast } from 'sonner';
 
 // Consolidated email editor with fields, body, inclusions, selfie and actions.
@@ -32,9 +35,11 @@ export const EmailEditor: React.FC = () => {
     body: '',
     inclusions: defaultInclusions,
     selfieAttached: false,
+    attachments: [],
   };
 
   const [draft, setDraft] = useState<EmailDraft>(defaultDraft);
+  const [isSending, setIsSending] = useState(false);
 
   useEffect(() => {
     handleGenerateAll();
@@ -64,38 +69,22 @@ export const EmailEditor: React.FC = () => {
     updateDraft({ subject: result.subject || draft.subject, body: result.body || draft.body });
   };
 
-  const handleSaveDraft = () => {
-    const timestamp = new Date().toISOString();
-    localStorage.setItem('email-draft', JSON.stringify(draft));
-    try {
-      const key = 'contact-activity';
-      const raw = localStorage.getItem(key);
-      const list = raw ? JSON.parse(raw) : [];
-      list.push({
-        id: Date.now().toString(),
-        meetingId: sampleMeetingSummary.id,
-        action: 'saved',
-        timestamp,
-        draft,
-      });
-      localStorage.setItem(key, JSON.stringify(list));
-    } catch (e) {
-      console.error('Failed to append contact activity', e);
-    }
-    toast.success('Draft saved successfully');
-  };
+  // Utilities
+  const normalizeRecipientsArray = (raw = '') =>
+    raw
+      .replace(/;/g, ',')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
 
   // Mailto builder for open-in-mail behavior
-  const normalizeRecipients = (raw = '') =>
-    raw.replace(/;/g, ',').split(',').map((s) => s.trim()).filter(Boolean).join(',');
-
   const buildMailto = (d: EmailDraft) => {
-    const to = normalizeRecipients(d.to || '');
-    const cc = normalizeRecipients(d.cc || '');
-    const bcc = normalizeRecipients(d.bcc || '');
+    const to = normalizeRecipientsArray(d.to || '').join(',');
+    const cc = normalizeRecipientsArray(d.cc || '').join(',');
+    const bcc = normalizeRecipientsArray(d.bcc || '').join(',');
     let body = (d.body || '').replace(/\r?\n/g, '\r\n');
-    if (d.selfieAttached && d.selfieUrl) {
-      body += '\r\n\r\n[Selfie attached separately — please attach the selfie image to this message before sending.]';
+    if (d.attachments && d.attachments.length > 0) {
+      body += '\r\n\r\n[Files attached: ' + d.attachments.map(a => a.name).join(', ') + ' — please attach these files to this message before sending.]';
     }
     const params = new URLSearchParams();
     if (d.subject) params.set('subject', d.subject);
@@ -133,38 +122,64 @@ export const EmailEditor: React.FC = () => {
   };
 
   const handleSend = async () => {
-    // Server-backed send via POST /api/send
+    const to = normalizeRecipientsArray(draft.to);
+    if (to.length === 0) {
+      toast.error('Please add at least one recipient.');
+      return;
+    }
+
+    setIsSending(true);
     try {
-      const payload = {
-        meetingId: sampleMeetingSummary.id,
-        draft,
-        sender: {
-          email: settings.userProfile?.email || undefined,
-          name: settings.userProfile?.name || undefined,
-        },
-      };
-      // Use absolute localhost URL (development). In production, use appropriate base URL or proxy.
-      const res = await fetch('/api/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+      // Prepare email body - draft.body is already HTML from generation
+      let emailBody = draft.body || '';
+      
+      // Extract plain text version for text/plain MIME part (strip HTML tags)
+      const textBody = emailBody
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<\/p>/gi, '\n')
+        .replace(/<p[^>]*>/gi, '')
+        .replace(/<strong[^>]*>/gi, '')
+        .replace(/<\/strong>/gi, '')
+        .replace(/<[^>]+>/g, '')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/\n\s*\n\s*\n/g, '\n\n')
+        .trim();
+
+      await emailService.sendEmail({
+        to,
+        cc: normalizeRecipientsArray(draft.cc),
+        bcc: normalizeRecipientsArray(draft.bcc),
+        subject: draft.subject || '(no subject)',
+        html: emailBody || undefined,
+        text: textBody || undefined,
+        from_email: settings.userProfile?.email || undefined,
+        from_name: settings.userProfile?.name || undefined,
+        attachments: (() => {
+          const allAttachments = [];
+          // Add selfie if attached
+          if (draft.selfieAttached && draft.selfieUrl) {
+            allAttachments.push({
+              name: 'selfie.jpg',
+              type: 'image/jpeg',
+              data: draft.selfieUrl,
+            });
+          }
+          // Add other attachments
+          if (draft.attachments && draft.attachments.length > 0) {
+            allAttachments.push(...draft.attachments.map(att => ({
+              name: att.name,
+              type: att.type,
+              data: att.data,
+            })));
+          }
+          return allAttachments.length > 0 ? allAttachments : undefined;
+        })(),
       });
 
-      if (!res.ok) {
-        // Try to extract a helpful error message from the response
-        let text = await res.text();
-        try {
-          const j = JSON.parse(text);
-          text = j.error || j.message || JSON.stringify(j);
-        } catch (_) {}
-        console.error('Send API error', text);
-        toast.error(`Failed to send email via server: ${text}`);
-        return;
-      }
-
-      const data = await res.json();
-
-      // Log 'sent' action to contact-activity
       const timestamp = new Date().toISOString();
       const key = 'contact-activity';
       const raw = localStorage.getItem(key);
@@ -175,14 +190,15 @@ export const EmailEditor: React.FC = () => {
         action: 'sent',
         timestamp,
         draft,
-        serverMessageId: data.messageId,
       });
       localStorage.setItem(key, JSON.stringify(list));
 
-      toast.success('Email sent successfully (server).');
-    } catch (e) {
+      toast.success('Email sent successfully.');
+    } catch (e: any) {
       console.error('Send failed', e);
-      toast.error('Failed to send email.');
+      toast.error(e?.message || 'Failed to send email.');
+    } finally {
+      setIsSending(false);
     }
   };
 
@@ -235,28 +251,6 @@ export const EmailEditor: React.FC = () => {
     </div>
   );
 
-  const InclusionsPanelBlock: React.FC = () => {
-    const enabledServices = settings.services.filter((s) => s.enabled);
-    const toggleInclusion = (key: keyof Omit<EmailInclusions, 'selectedServices'>) => updateInclusions({ ...draft.inclusions, [key]: !draft.inclusions[key] });
-    const toggleService = (serviceId: string) => {
-      const current = draft.inclusions.selectedServices;
-      const next = current.includes(serviceId) ? current.filter((id) => id !== serviceId) : [...current, serviceId];
-      updateInclusions({ ...draft.inclusions, selectedServices: next });
-    };
-    return (
-      <div className="bg-card rounded-xl border border-border p-5 shadow-soft">
-        <h3 className="font-semibold mb-4">Include in Email</h3>
-        <div className="space-y-3">
-          <div className="flex items-center justify-between"><Label className="flex items-center gap-2 cursor-pointer">Meeting Summary</Label><Switch checked={draft.inclusions.meetingSummary} onCheckedChange={() => toggleInclusion('meetingSummary')} /></div>
-          <div className="flex items-center justify-between"><Label className="flex items-center gap-2 cursor-pointer">Action Items / Next Steps</Label><Switch checked={draft.inclusions.actionItems} onCheckedChange={() => toggleInclusion('actionItems')} /></div>
-          <div className="flex items-center justify-between"><Label className="flex items-center gap-2 cursor-pointer">User Profile Block</Label><Switch checked={draft.inclusions.userProfile} onCheckedChange={() => toggleInclusion('userProfile')} /></div>
-          <div className="flex items-center justify-between"><Label className="flex items-center gap-2 cursor-pointer">Company Profile Block</Label><Switch checked={draft.inclusions.companyProfile} onCheckedChange={() => toggleInclusion('companyProfile')} /></div>
-          {enabledServices.length > 0 && (<div className="pt-3 border-t border-border"><Label className="flex items-center gap-2 mb-3">Services / Solutions</Label><div className="space-y-2 pl-6">{enabledServices.map((service) => (<div key={service.id} className="flex items-center gap-2"><Checkbox id={`service-${service.id}`} checked={draft.inclusions.selectedServices.includes(service.id)} onCheckedChange={() => toggleService(service.id)} /><Label htmlFor={`service-${service.id}`} className="text-sm cursor-pointer">{service.name}</Label></div>))}</div></div>)}
-        </div>
-      </div>
-    );
-  };
-
   const SelfieAttachmentBlock: React.FC = () => {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -299,18 +293,30 @@ export const EmailEditor: React.FC = () => {
     );
   };
 
-  const ActionButtonsBlock: React.FC = () => {
-    const handleCopy = () => {
-      navigator.clipboard.writeText(draft.body);
-      toast.success('Email copied to clipboard');
-      try {
-        const key = 'contact-activity';
-        const raw = localStorage.getItem(key);
-        const list = raw ? JSON.parse(raw) : [];
-        list.push({ id: Date.now().toString(), meetingId: sampleMeetingSummary.id, action: 'copied', timestamp: new Date().toISOString(), draft });
-        localStorage.setItem(key, JSON.stringify(list));
-      } catch (e) { console.error('Failed to log copy', e); }
+  const InclusionsPanelBlock: React.FC = () => {
+    const enabledServices = settings.services.filter((s) => s.enabled);
+    const toggleInclusion = (key: keyof Omit<EmailInclusions, 'selectedServices'>) => updateInclusions({ ...draft.inclusions, [key]: !draft.inclusions[key] });
+    const toggleService = (serviceId: string) => {
+      const current = draft.inclusions.selectedServices;
+      const next = current.includes(serviceId) ? current.filter((id) => id !== serviceId) : [...current, serviceId];
+      updateInclusions({ ...draft.inclusions, selectedServices: next });
     };
+    return (
+      <div className="bg-card rounded-xl border border-border p-5 shadow-soft">
+        <h3 className="font-semibold mb-4">Include in Email</h3>
+        <div className="space-y-3">
+          <div className="flex items-center justify-between"><Label className="flex items-center gap-2 cursor-pointer">Meeting Summary</Label><Switch checked={draft.inclusions.meetingSummary} onCheckedChange={() => toggleInclusion('meetingSummary')} /></div>
+          <div className="flex items-center justify-between"><Label className="flex items-center gap-2 cursor-pointer">Action Items / Next Steps</Label><Switch checked={draft.inclusions.actionItems} onCheckedChange={() => toggleInclusion('actionItems')} /></div>
+          <div className="flex items-center justify-between"><Label className="flex items-center gap-2 cursor-pointer">User Profile Block</Label><Switch checked={draft.inclusions.userProfile} onCheckedChange={() => toggleInclusion('userProfile')} /></div>
+          <div className="flex items-center justify-between"><Label className="flex items-center gap-2 cursor-pointer">Company Profile Block</Label><Switch checked={draft.inclusions.companyProfile} onCheckedChange={() => toggleInclusion('companyProfile')} /></div>
+          {enabledServices.length > 0 && (<div className="pt-3 border-t border-border"><Label className="flex items-center gap-2 mb-3">Services / Solutions</Label><div className="space-y-2 pl-6">{enabledServices.map((service) => (<div key={service.id} className="flex items-center gap-2"><Checkbox id={`service-${service.id}`} checked={draft.inclusions.selectedServices.includes(service.id)} onCheckedChange={() => toggleService(service.id)} /><Label htmlFor={`service-${service.id}`} className="text-sm cursor-pointer">{service.name}</Label></div>))}</div></div>)}
+        </div>
+      </div>
+    );
+  };
+
+
+  const ActionButtonsBlock: React.FC = () => {
     return (
       <div className="space-y-3">
         <div className="flex flex-wrap gap-2">
@@ -319,10 +325,10 @@ export const EmailEditor: React.FC = () => {
           <Button variant="outline" size="sm" onClick={handleGenerateAll} disabled={isGenerating}>Regenerate All</Button>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="secondary" onClick={handleCopy} disabled={!draft.body}>Copy</Button>
-          <Button variant="secondary" onClick={handleSaveDraft}>Save Draft</Button>
           <Button variant="ghost" onClick={handleOpenMailApp} disabled={!draft.body}>Open in Mail App</Button>
-          <Button onClick={handleSend} disabled={!draft.body} className="gradient-primary">Send</Button>
+          <Button onClick={handleSend} disabled={!draft.body || isSending} className="gradient-primary">
+            {isSending ? 'Sending...' : 'Send'}
+          </Button>
         </div>
       </div>
     );
@@ -342,6 +348,10 @@ export const EmailEditor: React.FC = () => {
         <div className="space-y-5">
           <InclusionsPanelBlock />
           <SelfieAttachmentBlock />
+          <FileAttachment
+            attachments={draft.attachments}
+            onAttachmentsChange={(attachments) => updateDraft({ attachments })}
+          />
         </div>
       </div>
     </main>
