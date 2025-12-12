@@ -10,6 +10,14 @@ export interface MeetingSummary {
   keyDecisions: string[];
 }
 
+export interface EmailAttachment {
+  id: string;
+  name: string;
+  type: string;
+  size: number;
+  data: string; // base64 data URL
+}
+
 export interface EmailDraft {
   to: string;
   cc: string;
@@ -19,6 +27,7 @@ export interface EmailDraft {
   inclusions: EmailInclusions;
   selfieAttached: boolean;
   selfieUrl?: string;
+  attachments: EmailAttachment[];
 }
 
 export interface EmailInclusions {

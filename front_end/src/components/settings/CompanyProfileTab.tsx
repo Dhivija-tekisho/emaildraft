@@ -76,6 +76,22 @@ export const CompanyProfileTab: React.FC = () => {
           />
         </div>
 
+        <div className="space-y-2">
+          <Label htmlFor="logoUrl" className="flex items-center gap-2">
+            <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+            Logo URL (optional)
+          </Label>
+          <Input
+            id="logoUrl"
+            value={companyProfile.logoUrl || ''}
+            onChange={(e) => updateCompanyProfile({ logoUrl: e.target.value })}
+            placeholder="/Tekisho-Logo.jpg or https://example.com/logo.jpg"
+          />
+          <p className="text-xs text-muted-foreground">
+            Path to logo image (e.g., /Tekisho-Logo.jpg for public folder, or full URL)
+          </p>
+        </div>
+
         <div className="grid sm:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label htmlFor="legalName" className="flex items-center gap-2">
