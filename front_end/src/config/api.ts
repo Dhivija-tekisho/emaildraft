@@ -15,6 +15,7 @@ export const API_ENDPOINTS = {
     },
     email: {
         send: '/api/send-email',
+        gmailCompose: '/api/gmail-compose-url',
     },
 };
 

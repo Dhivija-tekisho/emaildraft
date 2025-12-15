@@ -77,28 +77,18 @@ export const EmailEditor: React.FC = () => {
       .map((s) => s.trim())
       .filter(Boolean);
 
-  // Mailto builder for open-in-mail behavior
-  const buildMailto = (d: EmailDraft) => {
-    const to = normalizeRecipientsArray(d.to || '').join(',');
-    const cc = normalizeRecipientsArray(d.cc || '').join(',');
-    const bcc = normalizeRecipientsArray(d.bcc || '').join(',');
-    let body = (d.body || '').replace(/\r?\n/g, '\r\n');
-    if (d.attachments && d.attachments.length > 0) {
-      body += '\r\n\r\n[Files attached: ' + d.attachments.map(a => a.name).join(', ') + ' — please attach these files to this message before sending.]';
-    }
-    const params = new URLSearchParams();
-    if (d.subject) params.set('subject', d.subject);
-    if (body) params.set('body', body);
-    if (cc) params.set('cc', cc);
-    if (bcc) params.set('bcc', bcc);
-    const paramString = params.toString();
-    const encodedTo = to ? encodeURIComponent(to) : '';
-    return paramString ? `mailto:${encodedTo}?${paramString}` : `mailto:${encodedTo}`;
-  };
-
-  const handleOpenMailApp = () => {
+  const handleOpenMailApp = async () => {
     try {
-      const mailto = buildMailto(draft);
+      // Call backend to generate Gmail compose URL
+      const response = await emailService.getGmailComposeUrl({
+        to: draft.to || undefined,
+        cc: draft.cc || undefined,
+        bcc: draft.bcc || undefined,
+        subject: draft.subject || undefined,
+        body: draft.body || undefined,
+        attachments: draft.attachments || undefined,
+      });
+
       const timestamp = new Date().toISOString();
       const key = 'contact-activity';
       const raw = localStorage.getItem(key);
@@ -111,13 +101,22 @@ export const EmailEditor: React.FC = () => {
         draft,
       });
       localStorage.setItem(key, JSON.stringify(list));
-      const opened = window.open(mailto, '_blank');
-      if (!opened) window.location.href = mailto;
-      else { try { opened.focus(); } catch (e) {} }
-      toast.success('Opened your mail app (compose).');
-    } catch (e) {
-      console.error('Open mail app failed', e);
-      toast.error('Failed to open mail app.');
+
+      // Open Gmail compose in a new tab
+      window.open(response.url, '_blank');
+      toast.success('Opening Gmail compose...');
+    } catch (e: any) {
+      console.error('Open Gmail compose failed', e);
+      // Extract error message properly
+      let errorMessage = 'Failed to open Gmail compose.';
+      if (e instanceof Error) {
+        errorMessage = e.message;
+      } else if (typeof e === 'string') {
+        errorMessage = e;
+      } else if (e?.message) {
+        errorMessage = String(e.message);
+      }
+      toast.error(errorMessage);
     }
   };
 
@@ -149,13 +148,27 @@ export const EmailEditor: React.FC = () => {
         .replace(/\n\s*\n\s*\n/g, '\n\n')
         .trim();
 
+      // Ensure we have at least text or html content
+      const hasHtml = emailBody && emailBody.trim().length > 0;
+      const hasText = textBody && textBody.trim().length > 0;
+      
+      if (!hasHtml && !hasText) {
+        toast.error('Email body cannot be empty. Please generate or enter email content.');
+        setIsSending(false);
+        return;
+      }
+
+      // Normalize CC and BCC once
+      const ccList = normalizeRecipientsArray(draft.cc);
+      const bccList = normalizeRecipientsArray(draft.bcc);
+
       await emailService.sendEmail({
         to,
-        cc: normalizeRecipientsArray(draft.cc),
-        bcc: normalizeRecipientsArray(draft.bcc),
-        subject: draft.subject || '(no subject)',
-        html: emailBody || undefined,
-        text: textBody || undefined,
+        cc: ccList.length > 0 ? ccList : undefined,
+        bcc: bccList.length > 0 ? bccList : undefined,
+        subject: draft.subject && draft.subject.trim() ? draft.subject.trim() : '(no subject)',
+        html: hasHtml ? emailBody : undefined,
+        text: hasText ? textBody : undefined,
         from_email: settings.userProfile?.email || undefined,
         from_name: settings.userProfile?.name || undefined,
         attachments: (() => {
@@ -196,7 +209,22 @@ export const EmailEditor: React.FC = () => {
       toast.success('Email sent successfully.');
     } catch (e: any) {
       console.error('Send failed', e);
-      toast.error(e?.message || 'Failed to send email.');
+      // Extract error message properly
+      let errorMessage = 'Failed to send email.';
+      if (e instanceof Error) {
+        errorMessage = e.message;
+      } else if (typeof e === 'string') {
+        errorMessage = e;
+      } else if (e?.message) {
+        errorMessage = String(e.message);
+      }
+      
+      // Check if it's a validation error (422)
+      if (errorMessage.includes('Validation error') || errorMessage.includes('422')) {
+        errorMessage = 'Invalid email data. Please check that all required fields are filled correctly.';
+      }
+      
+      toast.error(errorMessage);
     } finally {
       setIsSending(false);
     }
