@@ -1,11 +1,15 @@
 import os
 import ssl
 import base64
+import re
 from email.message import EmailMessage
 from typing import List, Optional
+from urllib.parse import urlencode
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, EmailStr, Field, model_validator
 import aiosmtplib
 from dotenv import load_dotenv
@@ -41,8 +45,27 @@ class EmailRequest(BaseModel):
 
     @model_validator(mode="after")
     def ensure_body(cls, values):
-        if not values.text and not values.html:
-            raise ValueError("Either 'text' or 'html' content is required.")
+        # Check if text or html has actual content (not just empty strings)
+        text_content = values.text and values.text.strip()
+        html_content = values.html and values.html.strip()
+        if not text_content and not html_content:
+            raise ValueError("Either 'text' or 'html' content is required and must not be empty.")
+        return values
+
+
+class GmailComposeRequest(BaseModel):
+    to: Optional[str] = None
+    cc: Optional[str] = None
+    bcc: Optional[str] = None
+    subject: Optional[str] = None
+    body: Optional[str] = None  # HTML body
+    attachments: Optional[List[Attachment]] = None
+    
+    @model_validator(mode="after")
+    def validate_request(cls, values):
+        # At least one field should be provided
+        if not any([values.to, values.cc, values.bcc, values.subject, values.body]):
+            raise ValueError("At least one field (to, cc, bcc, subject, or body) must be provided")
         return values
 
 
@@ -57,6 +80,22 @@ app.add_middleware(
 )
 
 
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Provide detailed validation error messages."""
+    errors = []
+    for error in exc.errors():
+        field = " -> ".join(str(loc) for loc in error["loc"])
+        msg = error["msg"]
+        errors.append(f"{field}: {msg}")
+    
+    error_message = "Validation error: " + "; ".join(errors)
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={"detail": error_message, "errors": exc.errors()},
+    )
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok"}
@@ -64,6 +103,8 @@ async def health():
 
 @app.post("/api/send-email")
 async def send_email(payload: EmailRequest):
+    # FastAPI will automatically validate the request and return 422 if validation fails
+    # This will only execute if validation passes
     # Optional domain guard for custom from_email
     if payload.from_email and ALLOWED_FROM_DOMAIN:
         if not str(payload.from_email).lower().endswith("@" + ALLOWED_FROM_DOMAIN.lower()):
@@ -129,6 +170,89 @@ async def send_email(payload: EmailRequest):
 
         response = await aiosmtplib.send(message, **send_kwargs)
         return {"status": "sent", "response": response}
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to send email: {exc}") from exc
+        # Convert exception to string properly
+        error_msg = str(exc) if exc else "Unknown error"
+        raise HTTPException(status_code=500, detail=f"Failed to send email: {error_msg}") from exc
+
+
+def html_to_plain_text(html: str) -> str:
+    """Convert HTML to plain text for Gmail compose."""
+    if not html:
+        return ""
+    
+    # Replace HTML line breaks with newlines
+    text = html.replace('<br>', '\n').replace('<br/>', '\n').replace('<br />', '\n')
+    text = re.sub(r'</p>', '\n', text)
+    text = re.sub(r'<p[^>]*>', '', text)
+    text = re.sub(r'<strong[^>]*>', '', text)
+    text = re.sub(r'</strong>', '', text)
+    # Remove all remaining HTML tags
+    text = re.sub(r'<[^>]+>', '', text)
+    # Decode HTML entities
+    text = text.replace('&nbsp;', ' ')
+    text = text.replace('&amp;', '&')
+    text = text.replace('&lt;', '<')
+    text = text.replace('&gt;', '>')
+    text = text.replace('&quot;', '"')
+    # Clean up multiple newlines
+    text = re.sub(r'\n\s*\n\s*\n+', '\n\n', text)
+    return text.strip()
+
+
+def normalize_recipients(raw: str) -> List[str]:
+    """Normalize recipient string to list of emails."""
+    if not raw:
+        return []
+    return [email.strip() for email in re.split(r'[,;]', raw) if email.strip()]
+
+
+@app.post("/api/gmail-compose-url")
+async def get_gmail_compose_url(payload: GmailComposeRequest):
+    """Generate Gmail compose URL with prefilled email data."""
+    try:
+        # Normalize recipients - handle None values
+        to_list = normalize_recipients(payload.to or '')
+        cc_list = normalize_recipients(payload.cc or '')
+        bcc_list = normalize_recipients(payload.bcc or '')
+        
+        # Convert HTML body to plain text
+        body = html_to_plain_text(payload.body or '')
+        
+        # Add attachment note if there are attachments
+        if payload.attachments and len(payload.attachments) > 0:
+            try:
+                attachment_names = [att.name for att in payload.attachments]
+                body += '\n\n[Files attached: ' + ', '.join(attachment_names) + ' — please attach these files to this message before sending.]'
+            except Exception as e:
+                # If attachment processing fails, continue without attachment note
+                print(f"Warning: Failed to process attachments: {e}")
+        
+        # Build Gmail compose URL parameters
+        params = {}
+        if to_list:
+            params['to'] = ','.join(to_list)
+        if cc_list:
+            params['cc'] = ','.join(cc_list)
+        if bcc_list:
+            params['bcc'] = ','.join(bcc_list)
+        if payload.subject:
+            params['su'] = payload.subject  # Gmail uses 'su' for subject
+        if body:
+            params['body'] = body
+        
+        # Build the Gmail compose URL
+        gmail_url = f"https://mail.google.com/mail/?view=cm&fs=1&{urlencode(params)}"
+        
+        return {"url": gmail_url}
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+    except Exception as exc:
+        # Convert exception to string properly
+        error_msg = str(exc) if exc else "Unknown error"
+        raise HTTPException(status_code=500, detail=f"Failed to generate Gmail compose URL: {error_msg}") from exc
 
