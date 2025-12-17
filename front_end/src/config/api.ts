@@ -17,6 +17,15 @@ export const API_ENDPOINTS = {
         send: '/api/send-email',
         gmailCompose: '/api/gmail-compose-url',
     },
+    leads: {
+        getAll: '/api/leads',
+        getById: (id: string) => `/api/leads/${id}`,
+        getMeetings: (leadId: string) => `/api/leads/${leadId}/meetings`,
+    },
+    meetings: {
+        getAll: '/api/meetings',
+        getById: (id: string) => `/api/meetings/${id}`,
+    },
 };
 
 export const getAuthHeader = (): Record<string, string> => {

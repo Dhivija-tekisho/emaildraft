@@ -14,21 +14,45 @@ const generateEmailLocally = (
   const { userProfile, companyProfile, services, emailSettings } = settings;
   const selectedServices = services.filter((s) => inclusions.selectedServices.includes(s.id));
 
-  // Generate subject based on meeting summary
+  // Generate subject based on meeting summary and mode
   const generateSubject = () => {
-    const summaryWords = meeting.summary.split(' ').slice(0, 5).join(' ');
-    return `Follow-up: ${summaryWords}... | ${companyProfile.companyName}`;
+    const isVirtualMeeting = meeting.mode === 'Virtual';
+    const emailType = isVirtualMeeting ? 'Invitation' : 'Follow-up';
+    
+    // Extract key topic from mom or summary
+    let topic = meeting.companyName || 'Project Discussion';
+    
+    if (meeting.mom) {
+      // Extract first meaningful phrase from mom
+      const momWords = meeting.mom.split(/[,.]/).filter(w => w.trim().length > 0);
+      if (momWords.length > 0) {
+        const firstPhrase = momWords[0].trim();
+        topic = firstPhrase.length > 30 ? firstPhrase.substring(0, 30) + '...' : firstPhrase;
+      }
+    }
+    
+    return `${emailType}: ${topic} | ${companyProfile.companyName}`;
   };
 
   // Generate body based on settings and inclusions (returns HTML)
   const generateBody = () => {
+    const isVirtualMeeting = meeting.mode === 'Virtual';
     const greeting = emailSettings.tone === 'professional' 
       ? `Dear ${meeting.recipientName},` 
       : `Hi ${meeting.recipientName},`;
 
-    const intro = emailSettings.tone === 'professional'
-      ? `Thank you for taking the time to meet with me on ${meeting.meetingDate} at ${meeting.meetingTime}. It was a pleasure discussing with you.`
-      : `Great catching up with you on ${meeting.meetingDate}! Really enjoyed our conversation.`;
+    let intro = '';
+    if (isVirtualMeeting) {
+      // For invitation emails
+      intro = emailSettings.tone === 'professional'
+        ? `You are invited to a meeting with ${companyProfile.companyName}.`
+        : `You're invited to join our meeting!`;
+    } else {
+      // For follow-up emails
+      intro = emailSettings.tone === 'professional'
+        ? `Thank you for taking the time to meet with me on ${meeting.meetingDate} at ${meeting.meetingTime}. It was a pleasure discussing with you.`
+        : `Great catching up with you on ${meeting.meetingDate}! Really enjoyed our conversation.`;
+    }
 
     const ctaMessages = {
       schedule_call: "Would you be available for a follow-up call this week? Let me know your preferred time.",
@@ -41,19 +65,61 @@ const generateEmailLocally = (
       ? 'Best regards,' 
       : 'Looking forward to hearing from you!';
 
-    // Use the selected template to generate email body
-    return generateEmailBodyWithTemplate(
+    // Build meeting details section for invitation emails
+    let meetingDetailsSection = '';
+    if (isVirtualMeeting && meeting.scheduledDate && meeting.scheduledTime) {
+      meetingDetailsSection = `
+Meeting Details:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Date: ${meeting.scheduledDate}
+Time: ${meeting.scheduledTime}
+Platform: ${meeting.platform || 'TBD'}
+Meeting Link: ${meeting.meetingLink || 'To be confirmed'}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+`;
+    }
+
+    // For invitation emails, exclude meeting summary
+    const emailInclusions = isVirtualMeeting 
+      ? { ...inclusions, meetingSummary: false }
+      : inclusions;
+
+    // Generate HTML body
+    const htmlBody = generateEmailBodyWithTemplate(
       emailSettings.emailBodyTemplate,
       {
         meeting,
         settings,
-        inclusions,
+        inclusions: emailInclusions,
         greeting,
         intro,
         ctaMessage: ctaMessages[emailSettings.ctaStyle],
         closing,
       }
     );
+
+    // Convert HTML to plain text for display in textarea
+    const plainTextBody = (greeting + '\n\n' + intro + '\n\n' + meetingDetailsSection + htmlBody)
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/p>/gi, '\n')
+      .replace(/<\/div>/gi, '\n')
+      .replace(/<p[^>]*>/gi, '')
+      .replace(/<div[^>]*>/gi, '')
+      .replace(/<strong[^>]*>/gi, '')
+      .replace(/<\/strong>/gi, '')
+      .replace(/<em[^>]*>/gi, '')
+      .replace(/<\/em>/gi, '')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/\n\s*\n\s*\n/g, '\n\n')
+      .trim();
+
+    return plainTextBody;
   };
 
   if (type === 'subject') return { subject: generateSubject() };

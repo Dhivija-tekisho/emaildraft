@@ -8,6 +8,15 @@ export interface MeetingSummary {
   summary: string;
   actionItems: string[];
   keyDecisions: string[];
+  mode?: 'Virtual' | 'In-Person';
+  mom?: string; // Minutes of Meeting
+  // For Invitation emails
+  platform?: string; // Zoom, Teams, etc.
+  scheduledDate?: string;
+  scheduledTime?: string;
+  meetingLink?: string;
+  channelSent?: string;
+  companyName?: string;
 }
 
 export interface EmailAttachment {
@@ -55,4 +64,12 @@ export const sampleMeetingSummary: MeetingSummary = {
     'Agreed to maintain regular check-ins',
     'Decided to explore collaboration opportunities',
   ],
+  mode: 'Virtual',
+  mom: 'Discussed project scope, timeline, and deliverables. Client expressed interest in additional features and requested a proposal within 2 weeks.',
+  platform: 'Zoom',
+  scheduledDate: '2025-12-20',
+  scheduledTime: '10:30:00',
+  meetingLink: 'https://zoom.us/j/123456789',
+  channelSent: 'Email',
+  companyName: 'Tech Solutions Inc',
 };

@@ -14,24 +14,17 @@ interface EmailFieldsProps {
 export const EmailFields: React.FC<EmailFieldsProps> = ({ draft, meeting, onUpdate }) => {
   const [showCcBcc, setShowCcBcc] = useState(false);
 
-  const allEmails = [meeting.recipientEmail, ...(meeting.additionalEmails || [])];
-
   return (
     <div className="space-y-4">
       <div className="space-y-2">
         <Label htmlFor="to">To</Label>
-        <Input
+        <textarea
           id="to"
-          list="recipient-list"
           value={draft.to}
           onChange={(e) => onUpdate({ to: e.target.value })}
-          placeholder="Enter or select recipient"
+          placeholder="Enter recipient email(s) - use commas for multiple"
+          className="w-full px-3 py-2 border border-input rounded-md bg-background text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 min-h-[60px] resize-none"
         />
-        <datalist id="recipient-list">
-          {allEmails.map((email) => (
-            <option key={email} value={email} />
-          ))}
-        </datalist>
       </div>
 
       <Button
@@ -48,20 +41,22 @@ export const EmailFields: React.FC<EmailFieldsProps> = ({ draft, meeting, onUpda
         <div className="grid sm:grid-cols-2 gap-4 animate-fade-in">
           <div className="space-y-2">
             <Label htmlFor="cc">CC</Label>
-            <Input
+            <textarea
               id="cc"
               value={draft.cc}
               onChange={(e) => onUpdate({ cc: e.target.value })}
-              placeholder="cc@example.com"
+              placeholder="cc@example.com (comma-separated)"
+              className="w-full px-3 py-2 border border-input rounded-md bg-background text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 min-h-[60px] resize-none"
             />
           </div>
           <div className="space-y-2">
             <Label htmlFor="bcc">BCC</Label>
-            <Input
+            <textarea
               id="bcc"
               value={draft.bcc}
               onChange={(e) => onUpdate({ bcc: e.target.value })}
-              placeholder="bcc@example.com"
+              placeholder="bcc@example.com (comma-separated)"
+              className="w-full px-3 py-2 border border-input rounded-md bg-background text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 min-h-[60px] resize-none"
             />
           </div>
         </div>

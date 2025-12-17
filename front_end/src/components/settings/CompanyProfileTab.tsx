@@ -1,13 +1,35 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { useSettings } from '@/context/SettingsContext';
-import { Building2, Globe, MapPin, Quote, FileText, Mail } from 'lucide-react';
+import { Building2, Globe, MapPin, Quote, FileText, Mail, Loader, Search } from 'lucide-react';
 
 export const CompanyProfileTab: React.FC = () => {
-  const { settings, updateCompanyProfile } = useSettings();
+  const { settings, updateCompanyProfile, loadUserFromDatabase, searchAndLoadUser, isLoadingProfile } = useSettings();
   const { companyProfile } = settings;
+  const [searchInput, setSearchInput] = useState('');
+
+  // Load user data from database on component mount
+  useEffect(() => {
+    const loggedInUserId = localStorage.getItem('logged_in_user_id');
+    if (loggedInUserId) {
+      loadUserFromDatabase(loggedInUserId);
+    }
+  }, [loadUserFromDatabase]);
+
+  const handleSearch = async () => {
+    if (searchInput.trim()) {
+      await searchAndLoadUser(searchInput);
+    }
+  };
+
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleSearch();
+    }
+  };
 
   return (
     <div className="space-y-5">
@@ -15,10 +37,53 @@ export const CompanyProfileTab: React.FC = () => {
         <div className="p-2 rounded-lg bg-primary/10">
           <Building2 className="h-5 w-5 text-primary" />
         </div>
-        <div>
+        <div className="flex-1">
           <h3 className="font-semibold">Company Profile</h3>
           <p className="text-sm text-muted-foreground">Your company details for email branding</p>
         </div>
+        {isLoadingProfile && (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader className="h-4 w-4 animate-spin" />
+            Loading...
+          </div>
+        )}
+      </div>
+
+      {/* Search/Auto-fill Section */}
+      <div className="bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+        <Label className="flex items-center gap-2 mb-3 text-sm font-semibold text-blue-900 dark:text-blue-100">
+          <Search className="h-4 w-4" />
+          Auto-fill from Database
+        </Label>
+        <div className="flex gap-2">
+          <Input
+            placeholder="Enter user ID (1) or first name (Michael)..."
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            onKeyPress={handleKeyPress}
+            disabled={isLoadingProfile}
+          />
+          <Button 
+            onClick={handleSearch} 
+            disabled={isLoadingProfile}
+            className="whitespace-nowrap"
+          >
+            {isLoadingProfile ? (
+              <>
+                <Loader className="h-4 w-4 mr-2 animate-spin" />
+                Loading...
+              </>
+            ) : (
+              <>
+                <Search className="h-4 w-4 mr-2" />
+                Search
+              </>
+            )}
+          </Button>
+        </div>
+        <p className="text-xs text-blue-700 dark:text-blue-300 mt-2">
+          Sample: ID "1" or name "Michael" will auto-fill company details
+        </p>
       </div>
 
       <div className="grid gap-4">
